@@ -1,6 +1,60 @@
 <h2>Leave Requests</h2>
 
-<!-- TODO (candidate): add the "new request" form here, with validation. -->
+<section class="new-request" aria-labelledby="new-request-title">
+  <h3 id="new-request-title">New leave request</h3>
+
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="field">
+      <label for="employeeId">Employee</label>
+      <select id="employeeId" formControlName="employeeId">
+        <option [ngValue]="null" disabled>Select employee</option>
+        <option *ngFor="let e of employees" [ngValue]="e.id">{{ e.name }}</option>
+      </select>
+      <p class="error" *ngIf="showError('employeeId')">Please select an employee.</p>
+    </div>
+
+    <div class="field">
+      <label for="type">Leave type</label>
+      <select id="type" formControlName="type">
+        <option [ngValue]="null" disabled>Select type</option>
+        <option [ngValue]="0">Vacation</option>
+        <option [ngValue]="1">Sick</option>
+        <option [ngValue]="2">Unpaid</option>
+      </select>
+      <p class="error" *ngIf="showError('type')">Please select a leave type.</p>
+    </div>
+
+    <div class="field">
+      <label for="startDate">Start date</label>
+      <input id="startDate" type="date" formControlName="startDate" />
+      <p class="error" *ngIf="showError('startDate')">Start date is required.</p>
+    </div>
+
+    <div class="field">
+      <label for="endDate">End date</label>
+      <input id="endDate" type="date" formControlName="endDate" />
+      <p class="error" *ngIf="showError('endDate')">End date is required.</p>
+    </div>
+
+    <div class="field days">
+      <span>Days</span>
+      <strong>{{ computedDays === null ? '—' : computedDays }}</strong>
+      <p class="error" *ngIf="form.hasError('dateRange') && (form.get('startDate')?.touched || form.get('endDate')?.touched)">
+        Start date must not be after end date.
+      </p>
+      <p class="error" *ngIf="daysInvalid">
+        Number of days cannot be negative.
+      </p>
+    </div>
+
+    <p class="error" *ngIf="formError">{{ formError }}</p>
+    <p class="success" *ngIf="formSuccess">{{ formSuccess }}</p>
+
+    <button type="submit" [disabled]="submitting">
+      {{ submitting ? 'Submitting…' : 'Submit request' }}
+    </button>
+  </form>
+</section>
 
 <div *ngIf="loading">Loading...</div>
 
@@ -27,7 +81,7 @@
       <td>{{ r.days }}</td>
       <td>{{ statusLabel(r.status) }}</td>
       <td>
-        <button *ngIf="r.status == 0" (click)="approve(r.id)">Approve</button>
+        <button type="button" *ngIf="r.status == 0" (click)="approve(r.id)">Approve</button>
       </td>
     </tr>
   </tbody>

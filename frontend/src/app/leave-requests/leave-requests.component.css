@@ -4,8 +4,61 @@ button {
   border: none;
   padding: 4px 12px;
   border-radius: 4px;
+  cursor: pointer;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   background: #186faf;
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.new-request {
+  margin: 1rem 0 1.5rem;
+  max-width: 28rem;
+}
+
+.new-request h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.field label,
+.field.days > span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.field select,
+.field input[type='date'] {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #c5cdd6;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.field.days strong {
+  font-size: 1.1rem;
+}
+
+.error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.85rem;
+}
+
+.success {
+  margin: 0 0 0.75rem;
+  color: #067647;
+  font-size: 0.85rem;
 }
