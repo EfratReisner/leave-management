@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using LeaveManagement.Api.Data;
+using LeaveManagement.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,8 @@ builder.Services.AddDbContext<LeaveDbContext>(options =>
 // POC returns EF entities straight from the controller, which have circular
 // navigations (LeaveRequest <-> Employee). Tolerate the cycles so the app runs;
 // returning DTOs instead is a fair improvement for a candidate to suggest.
+builder.Services.AddScoped<LeaveRequestService>();
+
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
         o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);

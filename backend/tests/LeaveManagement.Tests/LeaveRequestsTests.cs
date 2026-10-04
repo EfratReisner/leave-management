@@ -1,5 +1,7 @@
 using LeaveManagement.Api.Controllers;
+using LeaveManagement.Api.Data;
 using LeaveManagement.Api.Models;
+using LeaveManagement.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Xunit;
 
@@ -14,6 +16,9 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         _database = database;
     }
 
+    private static LeaveRequestsController CreateController(LeaveDbContext db) =>
+        new(new LeaveRequestService(db));
+
     [Fact]
     public void Create_WithinQuota_Succeeds()
     {
@@ -23,7 +28,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         db.Employees.Add(emp);
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         // Act: request 3 days, well within the quota.
         var result = controller.Create(new CreateLeaveRequestDto
@@ -59,7 +64,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         });
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         // Act: 6 days is under the quota on its own, but 15 + 6 = 21 > 20.
         var result = controller.Create(new CreateLeaveRequestDto
@@ -94,7 +99,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         });
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         // 15 used + 5 requested = 20, exactly the quota.
         var result = controller.Create(new CreateLeaveRequestDto
@@ -127,7 +132,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         });
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var result = controller.Create(new CreateLeaveRequestDto
         {
@@ -148,7 +153,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         db.Employees.Add(emp);
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var result = controller.Create(new CreateLeaveRequestDto
         {
@@ -181,7 +186,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         db.LeaveRequests.Add(request);
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var result = await controller.Approve(request.Id, CancellationToken.None);
 
@@ -195,7 +200,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
     public async Task Approve_UnknownId_ReturnsNotFound()
     {
         using var db = _database.NewDb();
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var result = await controller.Approve(999, CancellationToken.None);
 
@@ -222,7 +227,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         db.LeaveRequests.Add(request);
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var result = await controller.Approve(request.Id, CancellationToken.None);
 
@@ -249,7 +254,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         db.LeaveRequests.Add(request);
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var result = await controller.Approve(request.Id, CancellationToken.None);
 
@@ -288,7 +293,7 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
         db.LeaveRequests.AddRange(first, second);
         db.SaveChanges();
 
-        var controller = new LeaveRequestsController(db);
+        var controller = CreateController(db);
 
         var firstResult = await controller.Approve(first.Id, CancellationToken.None);
         Assert.IsType<OkObjectResult>(firstResult);

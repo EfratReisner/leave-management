@@ -5,7 +5,10 @@
 > מלאו את הקובץ הזה. הוא חלק מההערכה — קצר וברור עדיף על ארוך.
 
 ## 1. החלטות ארכיטקטוניות
-- ...
+- הפרדת שכבות מינימלית: `LeaveRequestsController` דק (HTTP בלבד) + `LeaveRequestService` ללוגיקה/DB.
+- `ServiceResult<T>` ממפה שגיאות עסקיות (`NotFound` / `BadRequest` / `Conflict`) בלי לכרוך את ה‑service ב‑ASP.NET.
+- בלי Repository / CQRS / פרויקטים נוספים — ל‑POC קטן זה over-engineering; EF `DbContext` בשירות מספיק.
+- בונוס אבטחה בדרך: `Search` עבר מ‑SQL מחרוזתי (SQL injection) ל‑LINQ עם פרמטרים.
 
 ## 2. הבאג ביתרת החופשה
 - מה היה הבאג, איפה, ואיך תיקנתי: 
@@ -33,7 +36,7 @@
 - מה AI הציע, למה זה היה שגוי, ומה עשיתי במקום:
 
 ### אבטחה
-- אם מצאתם בעיית אבטחה: מה מצאתם, איפה (קובץ + שורה), למה זו בעיה, ואיך תיקנתם:
+- `LeaveRequestsController.Search` (לשעבר): SQL עם שרשור `name` → סיכון SQL injection. הוחלף ב‑LINQ ב‑`LeaveRequestService.SearchByEmployeeName`.
 
 ## 6. הוראות הרצה
 - (אם שיניתם משהו מהוראות ה‑README המקורי)
