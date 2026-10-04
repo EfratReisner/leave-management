@@ -80,8 +80,27 @@
       <td>{{ r.endDate | date: 'dd/MM/yyyy' }}</td>
       <td>{{ r.days }}</td>
       <td>{{ statusLabel(r.status) }}</td>
-      <td>
-        <button type="button" *ngIf="r.status == 0" (click)="approve(r.id)">Approve</button>
+      <td class="actions">
+        <button
+          type="button"
+          *ngIf="r.status === 0"
+          (click)="approve(r.id)"
+          [disabled]="approvingId !== null"
+        >
+          {{ approvingId === r.id ? 'Approving…' : 'Approve' }}
+        </button>
+        <p
+          class="feedback success"
+          *ngIf="approveFeedback?.id === r.id && approveFeedback?.kind === 'success'"
+        >
+          {{ approveFeedback?.text }}
+        </p>
+        <p
+          class="feedback error"
+          *ngIf="approveFeedback?.id === r.id && approveFeedback?.kind === 'error'"
+        >
+          {{ approveFeedback?.text }}
+        </p>
       </td>
     </tr>
   </tbody>

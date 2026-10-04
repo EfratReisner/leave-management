@@ -4,6 +4,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import {
   AbstractControl,
   FormBuilder,
+  FormGroup,
   ReactiveFormsModule,
   ValidationErrors,
   Validators
@@ -33,23 +34,29 @@ export class LeaveRequestsComponent implements OnInit {
   formError: string | null = null;
   formSuccess: string | null = null;
 
+  /** Row currently being approved; null when idle. */
+  approvingId: number | null = null;
+  approveFeedback: { id: number; kind: 'success' | 'error'; text: string } | null = null;
+
   private readonly leaveApiUrl = 'http://localhost:5080/api/leave-requests';
   private readonly employeesApiUrl = 'http://localhost:5080/api/employees';
 
-  form = this.fb.group(
-    {
-      employeeId: [null as number | null, Validators.required],
-      type: [null as number | null, Validators.required],
-      startDate: ['', Validators.required],
-      endDate: ['', Validators.required]
-    },
-    { validators: dateRangeValidator }
-  );
+  form: FormGroup;
 
   constructor(
     private http: HttpClient,
     private fb: FormBuilder
-  ) {}
+  ) {
+    this.form = this.fb.group(
+      {
+        employeeId: [null as number | null, Validators.required],
+        type: [null as number | null, Validators.required],
+        startDate: ['', Validators.required],
+        endDate: ['', Validators.required]
+      },
+      { validators: dateRangeValidator }
+    );
+  }
 
   ngOnInit(): void {
     this.load();
@@ -131,9 +138,63 @@ export class LeaveRequestsComponent implements OnInit {
   }
 
   approve(id: number): void {
-    this.http.post(`${this.leaveApiUrl}/${id}/approve`, {}).subscribe(() => {
-      this.load();
+    if (this.approvingId !== null) return;
+
+    this.approveFeedback = null;
+    this.approvingId = id;
+
+    this.http.post<LeaveRequest>(`${this.leaveApiUrl}/${id}/approve`, {}).subscribe({
+      next: (updated) => {
+        this.approvingId = null;
+        this.patchRequest(updated);
+        this.approveFeedback = {
+          id,
+          kind: 'success',
+          text: 'Request approved.'
+        };
+      },
+      error: (err: HttpErrorResponse) => {
+        this.approvingId = null;
+        this.approveFeedback = {
+          id,
+          kind: 'error',
+          text: this.approveErrorMessage(err)
+        };
+      }
     });
+  }
+
+  private patchRequest(updated: LeaveRequest): void {
+    const index = this.requests.findIndex((r) => r.id === updated.id);
+    if (index < 0) return;
+
+    const existing = this.requests[index];
+    this.requests = [
+      ...this.requests.slice(0, index),
+      {
+        ...existing,
+        ...updated,
+        // Approve response may omit the nested employee; keep the one we already have.
+        employee: updated.employee ?? existing.employee
+      },
+      ...this.requests.slice(index + 1)
+    ];
+  }
+
+  private approveErrorMessage(err: HttpErrorResponse): string {
+    if (typeof err.error === 'string' && err.error.trim()) {
+      return err.error;
+    }
+    if (err.status === 409) {
+      return 'This request was already approved or rejected.';
+    }
+    if (err.status === 404) {
+      return 'Leave request not found.';
+    }
+    if (err.status === 400) {
+      return 'Cannot approve: not enough vacation balance.';
+    }
+    return 'Could not approve leave request.';
   }
 
   typeLabel(type: number): string {
