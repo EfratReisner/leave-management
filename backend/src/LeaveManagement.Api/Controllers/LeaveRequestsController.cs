@@ -53,17 +53,23 @@ public class LeaveRequestsController : ControllerBase
         if (employee == null)
             return NotFound("Employee not found");
 
+        if (dto.EndDate < dto.StartDate)
+            return BadRequest("End date must not be before start date");
+
         var days = (dto.EndDate - dto.StartDate).Days + 1;
 
-        // How many vacation days has the employee already used this year?
+        // How many vacation days has the employee already used (or reserved with
+        // a pending request) in the year of this request?
+        var year = dto.StartDate.Year;
         var used = _db.LeaveRequests
             .Where(r => r.EmployeeId == dto.EmployeeId
                         && r.Type == LeaveType.Vacation
-                        && r.Status == LeaveStatus.Approved)
+                        && r.Status != LeaveStatus.Rejected
+                        && r.StartDate.Year == year)
             .Sum(r => r.Days);
 
-        // Make sure the request does not exceed the quota.
-        if (dto.Type == LeaveType.Vacation && days > employee.AnnualQuota)
+        // Make sure the request does not push the employee over the quota.
+        if (dto.Type == LeaveType.Vacation && used + days > employee.AnnualQuota)
         {
             return BadRequest("Not enough vacation balance");
         }
