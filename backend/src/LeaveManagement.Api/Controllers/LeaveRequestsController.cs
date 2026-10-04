@@ -1,3 +1,4 @@
+using System.Data;
 using LeaveManagement.Api.Data;
 using LeaveManagement.Api.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -88,5 +89,81 @@ public class LeaveRequestsController : ControllerBase
         _db.SaveChanges();
 
         return Ok(request);
+    }
+
+    // POST /api/leave-requests/{id}/approve
+    [HttpPost("{id:int}/approve")]
+    public async Task<IActionResult> Approve(int id, CancellationToken cancellationToken)
+    {
+        // Resolve the employee first so we can lock in a stable order (employee,
+        // then request) and avoid deadlocks when two approvals race.
+        var employeeId = await _db.LeaveRequests
+            .AsNoTracking()
+            .Where(r => r.Id == id)
+            .Select(r => (int?)r.EmployeeId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (employeeId is null)
+            return NotFound("Leave request not found");
+
+        await using var tx = await _db.Database.BeginTransactionAsync(
+            IsolationLevel.ReadCommitted, cancellationToken);
+
+        // Serialize approvals per employee: on PostgreSQL this takes a row lock
+        // (SELECT … FOR UPDATE). On SQLite the write transaction is the fallback.
+        var employee = await LockEmployeeAsync(employeeId.Value, cancellationToken);
+        if (employee is null)
+            return NotFound("Employee not found");
+
+        var request = await _db.LeaveRequests
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (request is null)
+            return NotFound("Leave request not found");
+
+        if (request.Status == LeaveStatus.Approved)
+            return Conflict("Leave request is already approved");
+
+        if (request.Status == LeaveStatus.Rejected)
+            return Conflict("Leave request is already rejected");
+
+        if (request.Type == LeaveType.Vacation)
+        {
+            var year = request.StartDate.Year;
+            var approvedDays = await _db.LeaveRequests
+                .Where(r => r.EmployeeId == request.EmployeeId
+                            && r.Type == LeaveType.Vacation
+                            && r.Status == LeaveStatus.Approved
+                            && r.StartDate.Year == year)
+                .SumAsync(r => r.Days, cancellationToken);
+
+            if (approvedDays + request.Days > employee.AnnualQuota)
+                return BadRequest("Not enough vacation balance");
+        }
+
+        request.Status = LeaveStatus.Approved;
+        await _db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        return Ok(request);
+    }
+
+    /// <summary>
+    /// Locks the employee row for the rest of the transaction on PostgreSQL.
+    /// SQLite has no meaningful row locks; the surrounding transaction still
+    /// provides basic isolation for the single-writer case.
+    /// </summary>
+    private async Task<Employee?> LockEmployeeAsync(int employeeId, CancellationToken cancellationToken)
+    {
+        if (_db.Database.IsNpgsql())
+        {
+            return await _db.Employees
+                .FromSqlInterpolated(
+                    $"SELECT * FROM \"Employees\" WHERE \"Id\" = {employeeId} FOR UPDATE")
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return await _db.Employees
+            .FirstOrDefaultAsync(e => e.Id == employeeId, cancellationToken);
     }
 }

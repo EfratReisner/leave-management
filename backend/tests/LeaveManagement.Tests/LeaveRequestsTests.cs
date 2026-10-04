@@ -160,4 +160,141 @@ public class LeaveRequestsTests : IClassFixture<TestDatabase>
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
+
+    [Fact]
+    public async Task Approve_PendingRequest_Succeeds()
+    {
+        using var db = _database.NewDb();
+        var emp = new Employee { Name = "Test Emp", AnnualQuota = 20 };
+        db.Employees.Add(emp);
+        db.SaveChanges();
+
+        var request = new LeaveRequest
+        {
+            EmployeeId = emp.Id,
+            Type = LeaveType.Vacation,
+            StartDate = new DateTime(2026, 3, 1),
+            EndDate = new DateTime(2026, 3, 3),
+            Days = 3,
+            Status = LeaveStatus.Pending
+        };
+        db.LeaveRequests.Add(request);
+        db.SaveChanges();
+
+        var controller = new LeaveRequestsController(db);
+
+        var result = await controller.Approve(request.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var approved = Assert.IsType<LeaveRequest>(ok.Value);
+        Assert.Equal(LeaveStatus.Approved, approved.Status);
+        Assert.Equal(LeaveStatus.Approved, db.LeaveRequests.Single().Status);
+    }
+
+    [Fact]
+    public async Task Approve_UnknownId_ReturnsNotFound()
+    {
+        using var db = _database.NewDb();
+        var controller = new LeaveRequestsController(db);
+
+        var result = await controller.Approve(999, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Approve_AlreadyApproved_ReturnsConflict()
+    {
+        using var db = _database.NewDb();
+        var emp = new Employee { Name = "Test Emp", AnnualQuota = 20 };
+        db.Employees.Add(emp);
+        db.SaveChanges();
+
+        var request = new LeaveRequest
+        {
+            EmployeeId = emp.Id,
+            Type = LeaveType.Vacation,
+            StartDate = new DateTime(2026, 3, 1),
+            EndDate = new DateTime(2026, 3, 3),
+            Days = 3,
+            Status = LeaveStatus.Approved
+        };
+        db.LeaveRequests.Add(request);
+        db.SaveChanges();
+
+        var controller = new LeaveRequestsController(db);
+
+        var result = await controller.Approve(request.Id, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Approve_AlreadyRejected_ReturnsConflict()
+    {
+        using var db = _database.NewDb();
+        var emp = new Employee { Name = "Test Emp", AnnualQuota = 20 };
+        db.Employees.Add(emp);
+        db.SaveChanges();
+
+        var request = new LeaveRequest
+        {
+            EmployeeId = emp.Id,
+            Type = LeaveType.Vacation,
+            StartDate = new DateTime(2026, 3, 1),
+            EndDate = new DateTime(2026, 3, 3),
+            Days = 3,
+            Status = LeaveStatus.Rejected
+        };
+        db.LeaveRequests.Add(request);
+        db.SaveChanges();
+
+        var controller = new LeaveRequestsController(db);
+
+        var result = await controller.Approve(request.Id, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(LeaveStatus.Rejected, db.LeaveRequests.Single().Status);
+    }
+
+    [Fact]
+    public async Task Approve_SecondRequestExceedingQuota_ReturnsBadRequest()
+    {
+        // Two pending requests that each fit alone but together exceed the quota.
+        // Seeded directly to simulate a race / legacy data that Create would block.
+        using var db = _database.NewDb();
+        var emp = new Employee { Name = "Test Emp", AnnualQuota = 20 };
+        db.Employees.Add(emp);
+        db.SaveChanges();
+
+        var first = new LeaveRequest
+        {
+            EmployeeId = emp.Id,
+            Type = LeaveType.Vacation,
+            StartDate = new DateTime(2026, 3, 1),
+            EndDate = new DateTime(2026, 3, 12),
+            Days = 12,
+            Status = LeaveStatus.Pending
+        };
+        var second = new LeaveRequest
+        {
+            EmployeeId = emp.Id,
+            Type = LeaveType.Vacation,
+            StartDate = new DateTime(2026, 4, 1),
+            EndDate = new DateTime(2026, 4, 12),
+            Days = 12,
+            Status = LeaveStatus.Pending
+        };
+        db.LeaveRequests.AddRange(first, second);
+        db.SaveChanges();
+
+        var controller = new LeaveRequestsController(db);
+
+        var firstResult = await controller.Approve(first.Id, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(firstResult);
+
+        var secondResult = await controller.Approve(second.Id, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(secondResult);
+        Assert.Equal(LeaveStatus.Pending, db.LeaveRequests.Single(r => r.Id == second.Id).Status);
+    }
 }
