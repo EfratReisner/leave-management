@@ -1,6 +1,7 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse } from '@angular/common/http';
 import {
   AbstractControl,
   FormBuilder,
@@ -9,7 +10,16 @@ import {
   ValidationErrors,
   Validators
 } from '@angular/forms';
-import { Employee, LeaveRequest } from '../models/leave-request.model';
+import {
+  CreateLeaveRequest,
+  Employee,
+  LeaveRequest,
+  LeaveStatus,
+  LeaveType,
+  RowFeedback
+} from '../models/leave-request.model';
+import { EmployeesService } from '../services/employees.service';
+import { LeaveRequestsService } from '../services/leave-requests.service';
 
 function dateRangeValidator(group: AbstractControl): ValidationErrors | null {
   const start = group.get('startDate')?.value as string | null;
@@ -27,6 +37,9 @@ function dateRangeValidator(group: AbstractControl): ValidationErrors | null {
   styleUrls: ['./leave-requests.component.css']
 })
 export class LeaveRequestsComponent implements OnInit {
+  readonly LeaveType = LeaveType;
+  readonly LeaveStatus = LeaveStatus;
+
   requests: LeaveRequest[] = [];
   employees: Employee[] = [];
   loading = false;
@@ -34,23 +47,21 @@ export class LeaveRequestsComponent implements OnInit {
   formError: string | null = null;
   formSuccess: string | null = null;
 
-  /** Row currently being approved; null when idle. */
   approvingId: number | null = null;
-  approveFeedback: { id: number; kind: 'success' | 'error'; text: string } | null = null;
-
-  private readonly leaveApiUrl = 'http://localhost:5080/api/leave-requests';
-  private readonly employeesApiUrl = 'http://localhost:5080/api/employees';
+  approveFeedback: RowFeedback | null = null;
 
   form: FormGroup;
 
-  constructor(
-    private http: HttpClient,
-    private fb: FormBuilder
-  ) {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly leaveRequests = inject(LeaveRequestsService);
+  private readonly employeesApi = inject(EmployeesService);
+  private readonly fb = inject(FormBuilder);
+
+  constructor() {
     this.form = this.fb.group(
       {
         employeeId: [null as number | null, Validators.required],
-        type: [null as number | null, Validators.required],
+        type: [null as LeaveType | null, Validators.required],
         startDate: ['', Validators.required],
         endDate: ['', Validators.required]
       },
@@ -59,16 +70,19 @@ export class LeaveRequestsComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.load();
-    this.http.get<Employee[]>(this.employeesApiUrl).subscribe({
-      next: (data) => (this.employees = data),
-      error: () => (this.formError = 'Could not load employees.')
-    });
+    this.loadRequests();
+    this.employeesApi
+      .getAll()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => (this.employees = data),
+        error: () => (this.formError = 'Could not load employees.')
+      });
   }
 
   get computedDays(): number | null {
-    const start = this.form.get('startDate')?.value;
-    const end = this.form.get('endDate')?.value;
+    const start = this.form.get('startDate')?.value as string | null;
+    const end = this.form.get('endDate')?.value as string | null;
     if (!start || !end) return null;
     const startMs = Date.parse(start);
     const endMs = Date.parse(end);
@@ -81,18 +95,21 @@ export class LeaveRequestsComponent implements OnInit {
     return days !== null && days < 0;
   }
 
-  load(): void {
+  loadRequests(): void {
     this.loading = true;
-    this.http.get<LeaveRequest[]>(this.leaveApiUrl).subscribe({
-      next: (data) => {
-        this.requests = data;
-        this.loading = false;
-      },
-      error: () => {
-        this.loading = false;
-        this.formError = 'Could not load leave requests.';
-      }
-    });
+    this.leaveRequests
+      .getAll()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.requests = data;
+          this.loading = false;
+        },
+        error: () => {
+          this.loading = false;
+          this.formError = 'Could not load leave requests.';
+        }
+      });
   }
 
   submit(): void {
@@ -105,16 +122,18 @@ export class LeaveRequestsComponent implements OnInit {
       return;
     }
 
-    const { employeeId, type, startDate, endDate } = this.form.getRawValue();
-    this.submitting = true;
+    const raw = this.form.getRawValue();
+    const payload: CreateLeaveRequest = {
+      employeeId: raw.employeeId as number,
+      type: raw.type as LeaveType,
+      startDate: raw.startDate as string,
+      endDate: raw.endDate as string
+    };
 
-    this.http
-      .post<LeaveRequest>(this.leaveApiUrl, {
-        employeeId,
-        type,
-        startDate,
-        endDate
-      })
+    this.submitting = true;
+    this.leaveRequests
+      .create(payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.submitting = false;
@@ -125,14 +144,11 @@ export class LeaveRequestsComponent implements OnInit {
             startDate: '',
             endDate: ''
           });
-          this.load();
+          this.loadRequests();
         },
         error: (err: HttpErrorResponse) => {
           this.submitting = false;
-          this.formError =
-            typeof err.error === 'string' && err.error.trim()
-              ? err.error
-              : 'Could not submit leave request.';
+          this.formError = this.httpErrorMessage(err, 'Could not submit leave request.');
         }
       });
   }
@@ -143,25 +159,59 @@ export class LeaveRequestsComponent implements OnInit {
     this.approveFeedback = null;
     this.approvingId = id;
 
-    this.http.post<LeaveRequest>(`${this.leaveApiUrl}/${id}/approve`, {}).subscribe({
-      next: (updated) => {
-        this.approvingId = null;
-        this.patchRequest(updated);
-        this.approveFeedback = {
-          id,
-          kind: 'success',
-          text: 'Request approved.'
-        };
-      },
-      error: (err: HttpErrorResponse) => {
-        this.approvingId = null;
-        this.approveFeedback = {
-          id,
-          kind: 'error',
-          text: this.approveErrorMessage(err)
-        };
-      }
-    });
+    this.leaveRequests
+      .approve(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.approvingId = null;
+          this.patchRequest(updated);
+          this.approveFeedback = {
+            id,
+            kind: 'success',
+            text: 'Request approved.'
+          };
+        },
+        error: (err: HttpErrorResponse) => {
+          this.approvingId = null;
+          this.approveFeedback = {
+            id,
+            kind: 'error',
+            text: this.approveErrorMessage(err)
+          };
+        }
+      });
+  }
+
+  typeLabel(type: LeaveType): string {
+    switch (type) {
+      case LeaveType.Vacation:
+        return 'Vacation';
+      case LeaveType.Sick:
+        return 'Sick';
+      case LeaveType.Unpaid:
+        return 'Unpaid';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  statusLabel(status: LeaveStatus): string {
+    switch (status) {
+      case LeaveStatus.Pending:
+        return 'Pending';
+      case LeaveStatus.Approved:
+        return 'Approved';
+      case LeaveStatus.Rejected:
+        return 'Rejected';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  showError(controlName: string): boolean {
+    const control = this.form.get(controlName);
+    return !!control && control.invalid && control.touched;
   }
 
   private patchRequest(updated: LeaveRequest): void {
@@ -174,7 +224,6 @@ export class LeaveRequestsComponent implements OnInit {
       {
         ...existing,
         ...updated,
-        // Approve response may omit the nested employee; keep the one we already have.
         employee: updated.employee ?? existing.employee
       },
       ...this.requests.slice(index + 1)
@@ -182,35 +231,22 @@ export class LeaveRequestsComponent implements OnInit {
   }
 
   private approveErrorMessage(err: HttpErrorResponse): string {
-    if (typeof err.error === 'string' && err.error.trim()) {
-      return err.error;
-    }
     if (err.status === 409) {
-      return 'This request was already approved or rejected.';
+      return this.httpErrorMessage(
+        err,
+        'This request was already approved or rejected.'
+      );
     }
     if (err.status === 404) {
-      return 'Leave request not found.';
+      return this.httpErrorMessage(err, 'Leave request not found.');
     }
     if (err.status === 400) {
-      return 'Cannot approve: not enough vacation balance.';
+      return this.httpErrorMessage(err, 'Cannot approve: not enough vacation balance.');
     }
-    return 'Could not approve leave request.';
+    return this.httpErrorMessage(err, 'Could not approve leave request.');
   }
 
-  typeLabel(type: number): string {
-    if (type === 0) return 'Vacation';
-    if (type === 1) return 'Sick';
-    return 'Unpaid';
-  }
-
-  statusLabel(status: number): string {
-    if (status === 0) return 'Pending';
-    if (status === 1) return 'Approved';
-    return 'Rejected';
-  }
-
-  showError(controlName: string): boolean {
-    const control = this.form.get(controlName);
-    return !!control && control.invalid && control.touched;
+  private httpErrorMessage(err: HttpErrorResponse, fallback: string): string {
+    return typeof err.error === 'string' && err.error.trim() ? err.error : fallback;
   }
 }
